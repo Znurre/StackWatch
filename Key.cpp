@@ -17,6 +17,11 @@ namespace api
 		return KeyValue(m_name, QString(value));
 	}
 
+	KeyValue Key::operator =(const QDateTime &value) const
+	{
+		return KeyValue(m_name, QString::number(value.toSecsSinceEpoch()));
+	}
+
 	KeyValue Key::operator =(int value) const
 	{
 		return KeyValue(m_name, QString::number(value));

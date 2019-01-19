@@ -1,84 +1,60 @@
 #include <QCoreApplication>
 #include <QSettings>
 #include <QDebug>
-#include <QNetworkRequest>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
 
-#include "KeyValue.h"
-#include "QStringEx.h"
-#include "Key.h"
-
-class RequestFactory
-{
-	public:
-		RequestFactory(const QString &teamUrl, const QByteArray &accessToken)
-			: m_baseUrl("https://api.stackexchange.com/2.2")
-			, m_teamUrl(teamUrl)
-			, m_accessToken(accessToken)
-		{
-		}
-
-		template<typename ...TParameters>
-		QNetworkRequest create(const QString &method, TParameters ...parameters)
-		{
-			const QStringList queryParameters =
-			{
-				// Method specific
-				parameters...,
-
-				// Default arguments
-				api::team_url = m_teamUrl,
-				api::site = QStringLiteral("stackoverflow"),
-				api::key = QStringLiteral("u9eRD30bklGv9t9gzDRSAQ((")
-			};
-
-			const QString &query = queryParameters.join("&");
-			const QStringList urlParts = { m_baseUrl, method, QStringEx::format("?%1", query) };
-			const QString &url = urlParts.join("/");
-
-			qDebug() << url << m_accessToken;
-
-			QNetworkRequest request(url);
-			request.setRawHeader("X-API-Access-Token", m_accessToken);
-
-			return request;
-		}
-
-	private:
-		QString m_baseUrl;
-		QString m_teamUrl;
-		QByteArray m_accessToken;
-};
+#include "Envelope.h"
+#include "User.h"
+#include "Poller.h"
+#include "EmailComposer.h"
 
 int main(int argc, char **argv)
 {
 	QCoreApplication application(argc, argv);
 
+	qRegisterMetaType<Envelope *>();
+	qRegisterMetaType<Question *>();
+	qRegisterMetaType<User *>();
+
 	QSettings settings("settings.ini", QSettings::IniFormat);
 
-	const QByteArray &access_token = settings
+	const QByteArray &accessToken = settings
 		.value("access_token")
 		.toByteArray();
 
-	const QString &team_url = settings
+	const QString &teamUrl = settings
 		.value("team_url")
 		.toString();
 
-	RequestFactory requestFactory(team_url, access_token);
+	const int fromDate = settings
+		.value("from_date")
+		.toInt();
 
-	const QNetworkRequest &request = requestFactory.create("questions/unanswered");
+	const QStringList &recipients = settings
+		.value("recipients")
+		.toStringList();
 
-	QNetworkAccessManager network;
+	const QByteArray &smtpServer = settings
+		.value("smtp_server")
+		.toByteArray();
 
-	QNetworkReply *reply = network.get(request);
+	const QByteArray &smtpUsername = settings
+		.value("smtp_username")
+		.toByteArray();
 
-	QObject::connect(reply, &QNetworkReply::finished, [reply]
-	{
-		qDebug() << reply->readAll();
-	});
+	const QByteArray &smtpPassword = settings
+		.value("smtp_password")
+		.toByteArray();
 
-	qDebug() << access_token << team_url;
+	EmailComposer emailComposer(recipients
+		, smtpServer
+		, smtpUsername
+		, smtpPassword
+		);
+
+	Poller poller(accessToken, teamUrl, settings);
+	poller.run(fromDate);
+
+	QObject::connect(&poller, &Poller::newQuestionsAvailable, &emailComposer, &EmailComposer::sendEmail);
 
 	return application.exec();
 }
